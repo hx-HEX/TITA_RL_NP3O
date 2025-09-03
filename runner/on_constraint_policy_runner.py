@@ -8,11 +8,11 @@ from torch.utils.tensorboard import SummaryWriter
 import torch
 from global_config import ROOT_DIR
 
-from modules import ActorCriticRMA,ActorCriticBarlowTwins
+from modules import ActorCriticRMA,ActorCriticBarlowTwins,FusionPolicyWithCritic
 from algorithm import NP3O
 from envs.vec_env import VecEnv
 from modules.depth_backbone import DepthOnlyFCBackbone58x87, RecurrentDepthBackbone
-from utils.helpers import hard_phase_schedualer, partial_checkpoint_load
+from utils.helpers import hard_phase_schedualer, partial_checkpoint_load,load_expert_from_file
 from copy import copy, deepcopy
 
 class OnConstraintPolicyRunner:
@@ -29,62 +29,69 @@ class OnConstraintPolicyRunner:
         self.depth_encoder_cfg = train_cfg["depth_encoder"]
         self.device = device
         self.env = env
+        
+        self.num_steps_per_env = self.cfg["num_steps_per_env"]
+        self.save_interval = self.cfg["save_interval"]
+        self.dagger_update_freq = self.alg_cfg["dagger_update_freq"]
 
         # self.phase1_end = self.cfg["phase1_end"] 
- 
         actor_critic_class = eval(self.cfg["policy_class_name"])  # ActorCritic
         actor_critic: ActorCriticRMA = actor_critic_class(self.env.cfg.env.n_proprio,
-                                                      self.env.cfg.env.n_scan,
-                                                      self.env.num_obs,
-                                                      self.env.cfg.env.n_priv_latent,
-                                                      self.env.cfg.env.history_len,
-                                                      self.env.num_actions,
-                                                      **self.policy_cfg)
+                                                        self.env.cfg.env.n_scan,
+                                                        self.env.num_obs,
+                                                        self.env.cfg.env.n_priv_latent,
+                                                        self.env.cfg.env.history_len,
+                                                        self.env.num_actions,
+                                                        **self.policy_cfg)
+
         if self.cfg['resume']:
             model_dict = torch.load(os.path.join(ROOT_DIR, self.cfg['resume_path']))
             actor_critic.load_state_dict(model_dict['model_state_dict'])
-        
+            
         actor_critic.to(self.device)
-        
-
+            
         # Depth encoder
         self.if_depth = self.depth_encoder_cfg["if_depth"]
         if self.if_depth:
             depth_backbone = DepthOnlyFCBackbone58x87(env.cfg.env.n_proprio, 
-                                                    self.policy_cfg["scan_encoder_dims"][-1], 
-                                                    self.depth_encoder_cfg["hidden_dims"],
-                                                    )
+                                                        self.policy_cfg["scan_encoder_dims"][-1], 
+                                                        self.depth_encoder_cfg["hidden_dims"],
+                                                        )
             depth_encoder = RecurrentDepthBackbone(depth_backbone, env.cfg).to(self.device)
             depth_actor = deepcopy(actor_critic.actor)
         else:
             depth_encoder = None
             depth_actor = None
 
+        # if using symmetry then pass the environment config object
+        if "symmetry_cfg" in self.alg_cfg and self.alg_cfg["symmetry_cfg"] is not None:
+            # this is used by the symmetry function for handling different observation terms
+            self.alg_cfg["symmetry_cfg"]["_env"] = env
+
         # Create algorithm
         self.alg_cfg['k_value'] = self.env.cost_k_values
         alg_class = eval(self.cfg["algorithm_class_name"]) # PPO
         self.alg = alg_class(actor_critic, 
-                                  depth_encoder, self.depth_encoder_cfg, depth_actor,
-                                  device=self.device,
-                                  **self.alg_cfg)
-        self.num_steps_per_env = self.cfg["num_steps_per_env"]
-        self.save_interval = self.cfg["save_interval"]
-        self.dagger_update_freq = self.alg_cfg["dagger_update_freq"]
+                                    depth_encoder, self.depth_encoder_cfg, depth_actor,
+                                    device=self.device,
+                                    **self.alg_cfg)
 
         self.alg.init_storage(
-            self.env.num_envs, 
-            self.num_steps_per_env, 
-            [self.env.num_obs], 
-            [self.env.num_privileged_obs], 
-            [self.env.num_actions],
-            [self.env.cfg.cost.num_costs],
-            self.env.cost_d_values_tensor
-        )
+                self.env.num_envs, 
+                self.num_steps_per_env, 
+                [self.env.num_obs], 
+                [self.env.num_privileged_obs], 
+                [self.env.num_actions],
+                [self.env.cfg.cost.num_costs],
+                self.env.cost_d_values_tensor,
+            )
+
         # Log
         self.log_dir = log_dir
         self.writer = None
         self.tot_timesteps = 0
         self.tot_time = 0
+        self.base_height_sample = 0
         self.current_learning_iteration = 0
 
         self.env.reset()
@@ -120,17 +127,6 @@ class OnConstraintPolicyRunner:
             self.alg.actor_critic.imitation_mode()
             
         for it in range(self.current_learning_iteration, tot_iter):
-            # act_teacher_flag = self.act_shed[it]
-            # imi_flag = self.imi_shed[it]
-            # lag_flag = self.lag_shed[it]
-
-            # self.alg.set_imi_flag(imi_flag)
-            # self.alg.actor_critic.set_teacher_act(act_teacher_flag)
-            # # self.env.randomize_lag_timesteps = lag_flag
-            # # if self.env.randomize_lag_timesteps:
-            # #     print("lag is on")
-            # # else:
-            # #     print("lag is off")
             if self.alg.actor_critic.imi_flag and self.cfg['resume']: 
                 step_size = 1/int(tot_iter/2)
                 imi_weight = max(0,1 - it * step_size)
@@ -142,7 +138,7 @@ class OnConstraintPolicyRunner:
                 for i in range(self.num_steps_per_env):
                    
                     actions = self.alg.act(obs, critic_obs, infos)
-                    obs, privileged_obs, rewards,costs,dones, infos = self.env.step(actions)  # obs has changed to next_obs !! if done obs has been reset
+                    obs, privileged_obs, rewards,costs,dones, infos,base_height,foot_height_mean = self.env.step(actions)  # obs has changed to next_obs !! if done obs has been reset
                     critic_obs = privileged_obs if privileged_obs is not None else obs
                     obs, critic_obs,rewards,costs,dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device),costs.to(self.device),dones.to(self.device)
                     self.alg.process_env_step(rewards,costs,dones, infos)
@@ -164,14 +160,14 @@ class OnConstraintPolicyRunner:
 
                 # Learning step
                 start = stop
+             
                 self.alg.compute_returns(critic_obs)
                 self.alg.compute_cost_returns(critic_obs)
 
             #update k value for better expolration
             k_value = self.alg.update_k_value(it)
-            
-            mean_value_loss,mean_cost_value_loss,mean_viol_loss,mean_surrogate_loss, mean_imitation_loss = self.alg.update()
-
+            mean_value_loss,mean_cost_value_loss,mean_viol_loss,mean_surrogate_loss, mean_imitation_loss, mean_symmetry_loss,mean_pri_loss = self.alg.update()
+            self.base_height_sample = base_height
             stop = time.time()
             learn_time = stop - start
             if self.log_dir is not None:
@@ -179,6 +175,7 @@ class OnConstraintPolicyRunner:
             if it % self.save_interval == 0:
                 self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
             ep_infos.clear()
+            print("foot_height_mean",foot_height_mean)
 
         self.current_learning_iteration += num_learning_iterations
         self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)))
@@ -211,19 +208,22 @@ class OnConstraintPolicyRunner:
         self.writer.add_scalar('Loss/surrogate', locs['mean_surrogate_loss'], locs['it'])
         self.writer.add_scalar('Loss/mean_viol_loss', locs['mean_viol_loss'], locs['it'])
         self.writer.add_scalar('Loss/mean_imitation_loss', locs['mean_imitation_loss'], locs['it'])
+        self.writer.add_scalar('Loss/mean_pri_loss', locs['mean_pri_loss'], locs['it'])
+        self.writer.add_scalar('Loss/mean_symmetry_loss', locs['mean_symmetry_loss'], locs['it'])
         self.writer.add_scalar('Loss/learning_rate', self.alg.learning_rate, locs['it'])
         self.writer.add_scalar('Policy/mean_noise_std', mean_std.item(), locs['it'])
         self.writer.add_scalar('Perf/total_fps', fps, locs['it'])
         self.writer.add_scalar('Perf/collection time', locs['collection_time'], locs['it'])
         self.writer.add_scalar('Perf/learning_time', locs['learn_time'], locs['it'])
+        
         if len(locs['rewbuffer']) > 0:
+            print("log_reward")
             self.writer.add_scalar('Train/mean_reward', statistics.mean(locs['rewbuffer']), locs['it'])
             self.writer.add_scalar('Train/mean_episode_length', statistics.mean(locs['lenbuffer']), locs['it'])
             self.writer.add_scalar('Train/mean_reward/time', statistics.mean(locs['rewbuffer']), self.tot_time)
             self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
 
         str = f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
-
         if len(locs['rewbuffer']) > 0:
             log_string = (f"""{'#' * width}\n"""
                           f"""{str.center(width, ' ')}\n\n"""
@@ -253,6 +253,7 @@ class OnConstraintPolicyRunner:
 
         log_string += ep_string
         log_string += (f"""{'-' * width}\n"""
+                       f"""{'Total base_height_sample:':>{pad}} {self.base_height_sample}\n"""
                        f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""
                        f"""{'Iteration time:':>{pad}} {iteration_time:.2f}s\n"""
                        f"""{'Total time:':>{pad}} {self.tot_time:.2f}s\n"""

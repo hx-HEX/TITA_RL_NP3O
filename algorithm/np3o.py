@@ -5,7 +5,8 @@ import torch.optim as optim
 
 from modules.actor_critic import ActorCriticRMA
 from runner.rollout_storage import RolloutStorageWithCost
-from utils import unpad_trajectories
+from utils import unpad_trajectories,string_to_callable
+from envs.vec_env import VecEnv
 
 class NP3O:
     actor_critic: ActorCriticRMA
@@ -32,6 +33,8 @@ class NP3O:
                  device='cpu',
                  dagger_update_freq=20,
                  priv_reg_coef_schedual = [0, 0, 0],
+                 # Symmetry parameters
+                 symmetry_cfg: dict = None,
                  **kwargs
                  ):
 
@@ -40,6 +43,27 @@ class NP3O:
         self.desired_kl = desired_kl
         self.schedule = schedule
         self.learning_rate = learning_rate
+        self.print_cnt = 0
+        # Symmetry components
+        if symmetry_cfg is not None:
+            # Check if symmetry is enabled
+            use_symmetry = symmetry_cfg["use_data_augmentation"]
+            # Print that we are not using symmetry
+            if not use_symmetry:
+                print("Symmetry not used for learning. We will use it for logging instead.")
+            # If function is a string then resolve it to a function
+            if isinstance(symmetry_cfg["data_augmentation_func"], str):
+                symmetry_cfg["data_augmentation_func"] = string_to_callable(symmetry_cfg["data_augmentation_func"])
+            # Check valid configuration
+            if symmetry_cfg["use_data_augmentation"] and not callable(symmetry_cfg["data_augmentation_func"]):
+                raise ValueError(
+                    "Data augmentation enabled but the function is not callable:"
+                    f" {symmetry_cfg['data_augmentation_func']}"
+                )
+            # Store symmetry configuration
+            self.symmetry = symmetry_cfg
+        else:
+            self.symmetry = None
 
         # PPO components
         self.actor_critic = actor_critic
@@ -187,7 +211,18 @@ class NP3O:
         mean_viol_loss = 0
         mean_surrogate_loss = 0
         mean_imitation_loss = 0
-        
+        mean_pri_loss = 0
+        # -- Symmetry loss
+        if self.symmetry:
+            mean_symmetry_loss = 0
+        else:
+            mean_symmetry_loss = None
+
+        # ---------------- NEW: 统计门控损失均值（不改变函数返回签名，不强制用） ----------------
+        mean_gating_reg_loss = 0.0
+        mean_gating_sup_loss = 0.0
+        # -------------------------------------------------------------------------
+
         if self.actor_critic.is_recurrent:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         else:
@@ -195,13 +230,48 @@ class NP3O:
         for obs_batch, critic_obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
             old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch, target_cost_values_batch,cost_advantages_batch,cost_returns_batch,cost_violation_batch in generator:
 
+                # number of augmentations per sample
+                # we start with 1 and increase it if we use symmetry augmentation
+                num_aug = 1
+                # original batch size
+                original_batch_size = obs_batch.shape[0]
+                # Perform symmetric augmentation
+                if self.symmetry and self.symmetry["use_data_augmentation"]:
+                    # augmentation using symmetry
+                    data_augmentation_func = self.symmetry["data_augmentation_func"]
+                    # returned shape: [batch_size * num_aug, ...]
+                    obs_batch, actions_batch = data_augmentation_func(
+                        obs=obs_batch, actions=actions_batch, env=self.symmetry["_env"], obs_type="policy"
+                    )
+                    critic_obs_batch, _ = data_augmentation_func(
+                        obs=critic_obs_batch, actions=None, env=self.symmetry["_env"], obs_type="critic"
+                    )
+                    # compute number of augmentations per sample
+                    num_aug = int(obs_batch.shape[0] / original_batch_size)
+                    # repeat the rest of the batch,reward
+                    # -- actor
+                    old_actions_log_prob_batch = old_actions_log_prob_batch.repeat(num_aug, 1)
+                    # -- critic
+                    target_values_batch = target_values_batch.repeat(num_aug, 1)
+                    advantages_batch = advantages_batch.repeat(num_aug, 1)
+                    returns_batch = returns_batch.repeat(num_aug, 1)
+                    # repeat cost-related targets
+                    target_cost_values_batch = target_cost_values_batch.repeat(num_aug, 1)
+                    cost_advantages_batch = cost_advantages_batch.repeat(num_aug, 1)
+                    cost_returns_batch = cost_returns_batch.repeat(num_aug, 1)
+                    cost_violation_batch = cost_violation_batch.repeat(num_aug, 1)  # 如果有这个量并用于loss
+
+                # -- actor
                 self.actor_critic.act(obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0]) # match distribution dimension
                 actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
+                # -- critic
                 value_batch = self.actor_critic.evaluate(critic_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[1])
                 cost_value_batch = self.actor_critic.evaluate_cost(critic_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[1])
-                mu_batch = self.actor_critic.action_mean
-                sigma_batch = self.actor_critic.action_std
-                entropy_batch = self.actor_critic.entropy
+                # -- entropy
+                # we only keep the entropy of the first augmentation (the original one)
+                mu_batch = self.actor_critic.action_mean[:original_batch_size]
+                sigma_batch = self.actor_critic.action_std[:original_batch_size]
+                entropy_batch = self.actor_critic.entropy[:original_batch_size]
                 
                 # KL
                 if self.desired_kl != None and self.schedule == 'adaptive':
@@ -241,12 +311,48 @@ class NP3O:
                 main_loss = surrogate_loss + self.cost_viol_loss_coef * viol_loss 
                 combine_value_loss = self.cost_value_loss_coef * cost_value_loss + self.value_loss_coef * value_loss
                 entropy_loss = - self.entropy_coef * entropy_batch.mean()
-
+                
                 if self.imi_flag:
-                    imitation_loss = self.actor_critic.imitation_learning_loss(obs_batch)
-                    loss = main_loss + combine_value_loss + entropy_loss + self.imi_weight*imitation_loss
+                    imitation_loss, pri_loss = self.actor_critic.imitation_learning_loss(obs_batch)
+                    loss = main_loss + combine_value_loss + entropy_loss \
+                        + self.imi_weight * imitation_loss 
                 else:
-                    loss = main_loss + combine_value_loss + entropy_loss
+                    loss = main_loss + combine_value_loss + entropy_loss 
+
+                # Symmetry loss
+                if self.symmetry:
+                    # obtain the symmetric actions
+                    # if we did augmentation before then we don't need to augment again
+                    if not self.symmetry["use_data_augmentation"]:
+                        data_augmentation_func = self.symmetry["data_augmentation_func"]
+                        obs_batch, _ = data_augmentation_func(
+                            obs=obs_batch, actions=None, env=self.symmetry["_env"], obs_type="policy"
+                        )
+                        # compute number of augmentations per sample
+                        num_aug = int(obs_batch.shape[0] / original_batch_size)
+
+                    # actions predicted by the actor for symmetrically-augmented observations
+                    mean_actions_batch = self.actor_critic.act_teacher(obs_batch.detach().clone())
+
+                    # compute the symmetrically augmented actions
+                    # note: we are assuming the first augmentation is the original one.
+                    #   We do not use the action_batch from earlier since that action was sampled from the distribution.
+                    #   However, the symmetry loss is computed using the mean of the distribution.
+                    action_mean_orig = mean_actions_batch[:original_batch_size]
+                    _, actions_mean_symm_batch = data_augmentation_func(
+                        obs=None, actions=action_mean_orig, env=self.symmetry["_env"], obs_type="policy"
+                    )
+
+                    # compute the loss (we skip the first augmentation as it is the original one)
+                    mse_loss = torch.nn.MSELoss()
+                    symmetry_loss = mse_loss(
+                        mean_actions_batch[original_batch_size:], actions_mean_symm_batch.detach()[original_batch_size:]
+                    )
+                    # add the loss to the total loss
+                    if self.symmetry["use_mirror_loss"]:
+                        loss += self.symmetry["mirror_loss_coeff"] * symmetry_loss
+                    else:
+                        symmetry_loss = symmetry_loss.detach()
 
                 # Gradient step
                 self.optimizer.zero_grad()
@@ -260,22 +366,13 @@ class NP3O:
                 mean_surrogate_loss += surrogate_loss.item()
                 if self.imi_flag:
                     mean_imitation_loss += imitation_loss.item()
+                    mean_pri_loss += pri_loss.item()
                 else:
                     mean_imitation_loss += 0
-
-                # if self.imi_flag:
-                #     # imitation module gradient step
-                #     for epoch in range(self.substeps):
-                #         imitation_loss = self.actor_critic.imitation_learning_loss(obs_batch)
-                #         self.imitation_optimizer.zero_grad()
-                #         imitation_loss.backward()
-                #         nn.utils.clip_grad_norm_(self.imitation_params_list, self.max_grad_norm)
-                #         self.imitation_optimizer.step()
-
-                #         mean_imitation_loss += imitation_loss.item()
-                # else:
-                #     mean_imitation_loss += 0
-
+                    mean_pri_loss +=0
+                # -- Symmetry loss
+                if mean_symmetry_loss is not None:
+                    mean_symmetry_loss += symmetry_loss.item()
 
         num_updates = self.num_learning_epochs * self.num_mini_batches
         mean_value_loss /= num_updates
@@ -283,10 +380,14 @@ class NP3O:
         mean_viol_loss /= num_updates
         mean_surrogate_loss /= num_updates
         mean_imitation_loss /= num_updates*self.substeps
+        mean_pri_loss /= num_updates*self.substeps
+        # -- For Symmetry
+        if mean_symmetry_loss is not None:
+            mean_symmetry_loss /= num_updates
 
         self.storage.clear()
-   
-        return mean_value_loss,mean_cost_value_loss,mean_viol_loss,mean_surrogate_loss,mean_imitation_loss
+
+        return mean_value_loss,mean_cost_value_loss,mean_viol_loss,mean_surrogate_loss,mean_imitation_loss,mean_symmetry_loss,mean_pri_loss
     
     def update_depth_actor(self, actions_student_batch, actions_teacher_batch):
         if self.if_depth:

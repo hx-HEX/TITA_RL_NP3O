@@ -7,7 +7,7 @@ from shutil import copyfile
 import ntpath
 
 from envs.vec_env import VecEnv
-from runner import OnConstraintPolicyRunner
+from runner import OnConstraintPolicyRunner,OnConstraintPolicyRunnerFusion
 
 from global_config import ROOT_DIR, ENVS_DIR
 from .helpers import get_args, update_cfg_from_args, class_to_dict, get_load_path, set_seed, parse_sim_params

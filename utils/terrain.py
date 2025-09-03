@@ -84,11 +84,11 @@ class Terrain:
                                 horizontal_scale=self.cfg.horizontal_scale)
         #通过传入的地形难度系数(difficulty)更新斜坡坡度、台阶高度、障碍物高度、踏石大小、空隙大小、坑洞深度
         slope = difficulty * 0.4
-        step_height = 0.02 + 0.1 * difficulty
+        step_height = 0.02 + 0.2 * difficulty
         discrete_obstacles_height = 0.02 + difficulty * 0.02
         stepping_stones_size = 1.5 * (1.05 - difficulty)
         stone_distance = 0.05 if difficulty==0 else 0.1
-        gap_size = 1. * difficulty
+        gap_size = 0.2 * difficulty
         pit_depth = 1. * difficulty
         
         #通过传入的类型系数确定生成的地形，前6种地形直接调用terrain_utils的api生成，后2种自定义生成，本质上是生成terrain.height_field_raw

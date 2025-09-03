@@ -1,5 +1,5 @@
 from .actor_critic import ActorCriticRMA
-from .actor_critic import ActorCriticBarlowTwins
+from .actor_critic import ActorCriticBarlowTwins,FusionPolicyWithCritic
 from .actor_critic import ActorCritic
 from .actor_critic_recurrent import ActorCriticRecurrent
 from .estimator import Estimator

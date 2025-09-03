@@ -2,9 +2,12 @@ import numpy as np
 import os
 from datetime import datetime
 from configs.tita_constraint_config import TitaConstraintRoughCfg, TitaConstraintRoughCfgPPO
+from configs.tita_wheel_constraint_config import TitaConstraintWheelCfg, TitaConstraintWheelCfgPPO
+from configs.tita_fusion_constraint_config import TitaFusionCfg, TitaFusionCfgPPO
 from configs.tita_flat_config import TitaFlatCfg, TitaFlatCfgPPO
 from configs.tita_rough_config import TitaRoughCfg, TitaRoughCfgPPO
 from envs.no_constrains_legged_robot import Tita
+from configs.tita_feet_constraint_config import TitaConstraintFeetCfg,TitaConstraintFeetCfgPPO
 
 from global_config import ROOT_DIR, ENVS_DIR
 import isaacgym
@@ -32,6 +35,9 @@ def train(args):
 if __name__ == '__main__':
 
     task_registry.register("tita_constraint",LeggedRobot,TitaConstraintRoughCfg(),TitaConstraintRoughCfgPPO())
+    task_registry.register("tita_wheel_constraint",LeggedRobot,TitaConstraintWheelCfg(),TitaConstraintWheelCfgPPO())
+    task_registry.register("tita_feet_constraint",LeggedRobot,TitaConstraintFeetCfg(),TitaConstraintFeetCfgPPO())
+    task_registry.register("tita_fusion_constraint", LeggedRobot, TitaFusionCfg(), TitaFusionCfgPPO())
     task_registry.register("tita_flat", Tita, TitaFlatCfg(), TitaFlatCfgPPO())
     task_registry.register("tita_rough", Tita, TitaRoughCfg(), TitaRoughCfgPPO())
 

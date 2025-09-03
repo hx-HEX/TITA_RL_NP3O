@@ -84,9 +84,9 @@ class TitaConstraintRoughCfg( LeggedRobotCfg ):
 
         class ranges:
             lin_vel_x = [-2.0, 2.0]  # min max [m/s]
-            # lin_vel_y = [-1.0, 1.0]  # min max [m/s]
+            lin_vel_y = [-1.0, 1.0]  # min max [m/s]
             ang_vel_yaw = [-2, 2]  # min max [rad/s]
-            height = [0.3,0.35] 
+            # height = [0.3,0.35] 
             heading = [-3.14, 3.14]
 
     class asset( LeggedRobotCfg.asset ):
@@ -112,7 +112,7 @@ class TitaConstraintRoughCfg( LeggedRobotCfg ):
             ang_vel_xy = -0.05
             dof_vel = 0.0
             dof_acc = -2.5e-7
-            base_height = 1.0
+            base_height = -1.0#1.0
             feet_air_time = 0.0
             collision = -1.0
             feet_stumble = 0.0
@@ -147,7 +147,7 @@ class TitaConstraintRoughCfg( LeggedRobotCfg ):
         lag_timesteps = 3
 
         disturbance = False
-        disturbance_range = [-30.0, 30.0]
+        disturbancFe_range = [-30.0, 30.0]
         disturbance_interval = 8
     
     class depth( LeggedRobotCfg.depth):
@@ -242,7 +242,7 @@ class TitaConstraintRoughCfgPPO( LeggedRobotCfgPPO ):
         max_iterations = 10000
         num_steps_per_env = 24
         resume = True
-        resume_path = '60_2.0_foot==1_model_1700.pt'
+        resume_path = '60_2.0_foot>0_vel_xy_model_8000.pt'
 
  
 

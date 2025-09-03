@@ -13,9 +13,8 @@ import torch
 from global_config import ROOT_DIR
 
 from PIL import Image as im
-
-
-
+from configs.tita_wheel_constraint_config import TitaConstraintWheelCfg, TitaConstraintWheelCfgPPO
+from configs.tita_feet_constraint_config import TitaConstraintFeetCfg,TitaConstraintFeetCfgPPO
 from configs.tita_flat_config import TitaFlatCfg, TitaFlatCfgPPO
 from configs.tita_rough_config import TitaRoughCfg, TitaRoughCfgPPO
 
@@ -55,6 +54,9 @@ def play_on_constraint_policy_runner(args):
     env_cfg.noise.add_noise = False
     env_cfg.domain_rand.randomize_friction = False
     env_cfg.domain_rand.randomize_restitution = False
+    env_cfg.domain_rand.randomize_imu_offset = False
+    env_cfg.domain_rand.randomize_default_dof_pos = False
+    env_cfg.domain_rand.randomize_inertia = False
     env_cfg.control.use_filter = True
     # prepare environment
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
@@ -72,10 +74,16 @@ def play_on_constraint_policy_runner(args):
                                                       **policy_cfg_dict)
     print(policy)
     #model_dict = torch.load(os.path.join(ROOT_DIR, 'model_4000_phase2_hip.pt'))
-    model_dict = torch.load(os.path.join(ROOT_DIR, '60_2.0_foot>0_model_10000.pt'))
+    model_dict = torch.load(os.path.join(ROOT_DIR, 'logs/tita_wheel_constraint/Jul15_02-42-04_test_barlowtwins_feetcontact/model_10000.pt'))
     policy.load_state_dict(model_dict['model_state_dict'])
     policy = policy.to(env.device)
     policy.save_torch_jit_policy('model.pt',env.device)
+    # 把模型移动到 CPU
+    policy_cpu = policy.to("cpu")
+
+    # 保存为 CPU 版本
+    policy_cpu.save_torch_jit_policy('model_cpu.pt', device='cpu')
+    policy = policy.to(env.device)
 
     # clear images under frames folder
     # frames_path = os.path.join(ROOT_DIR, 'logs', train_cfg.runner.experiment_name, 'exported', 'frames')
@@ -117,14 +125,20 @@ def play_on_constraint_policy_runner(args):
 
         env.commands[:,0] = 1.0
         env.commands[:,1] = 0.0
-        env.commands[:,2] = 0.3
-        env.commands[:,3] = 3.14/4
+        env.commands[:,2] = 0.0
+        env.commands[:,3] = 0.0
         actions = policy.act_teacher(obs)
         # actions = torch.clamp(actions,-1.2,1.2)
 
-        obs, privileged_obs, rewards,costs,dones, infos = env.step(actions)
+        obs, privileged_obs, rewards,costs,dones, infos,base_height = env.step(actions)
+        # print("position_left",obs[0,10])
+        # print("position_right",obs[0,14])
+        # print("action_left",actions[0,1])
+        # print("action_right",actions[0,5])
         env.gym.step_graphics(env.sim) # required to render in headless mode
         env.gym.render_all_camera_sensors(env.sim)
+        print("action_vel_1:",actions[0,3])
+        print("action_vel_2:",actions[0,7])
         if RECORD_FRAMES:
             img = env.gym.get_camera_image(env.sim, env.envs[0], cam_handle, gymapi.IMAGE_COLOR).reshape((512,512,4))[:,:,:3]
             if video is None:
@@ -199,6 +213,8 @@ if __name__ == '__main__':
     task_registry.register("tita_flat", Tita, TitaFlatCfg(), TitaFlatCfgPPO())
     task_registry.register("tita_rough", Tita, TitaRoughCfg(), TitaRoughCfgPPO())
     task_registry.register("tita_constraint", LeggedRobot, TitaConstraintRoughCfg(), TitaConstraintRoughCfgPPO())
+    task_registry.register("tita_wheel_constraint",LeggedRobot,TitaConstraintWheelCfg(),TitaConstraintWheelCfgPPO())
+    task_registry.register("tita_feet_constraint",LeggedRobot,TitaConstraintFeetCfg(),TitaConstraintFeetCfgPPO())
 
     args = get_args()
 
@@ -209,4 +225,8 @@ if __name__ == '__main__':
     if task_name in ["tita_flat", "tita_rough"]:
         play_no_constraint_policy_runner(args)
     elif task_name == "tita_constraint":
+        play_on_constraint_policy_runner(args)
+    elif task_name == "tita_wheel_constraint":
+        play_on_constraint_policy_runner(args)
+    elif task_name == "tita_feet_constraint":
         play_on_constraint_policy_runner(args)

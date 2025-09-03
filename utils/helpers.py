@@ -5,6 +5,8 @@ import numpy as np
 import random
 from isaacgym import gymapi
 from isaacgym import gymutil
+from omegaconf import OmegaConf
+import importlib.util
 
 def partial_checkpoint_load(pretrain_dict, model):
     
@@ -239,3 +241,63 @@ def hard_phase_schedualer(max_iters,phase1_end):
     lag_schedual[phase1_end:] = True
     return act_schedual,imitation_schedual,lag_schedual
 
+import importlib.util
+import inspect
+import torch
+
+def load_expert_from_file(cfg_path: str, ckpt_path: str, device='cuda'):
+    """
+    自动加载专家策略：
+    - 从 cfg_path 自动识别并加载 TitaXXXCfg 和 TitaXXXCfgPPO 类
+    - 使用 runner.policy_class_name 实例化策略
+    - 加载 checkpoint 权重
+    """
+    from modules import ActorCriticRMA,ActorCriticBarlowTwins,FusionPolicyWithCritic
+    # === Step 1: 加载 py 配置模块 ===
+    spec = importlib.util.spec_from_file_location("expert_cfg", cfg_path)
+    cfg_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cfg_module)
+
+    # === Step 2: 提取 Cfg 和 CfgPPO 类 ===
+    classes = inspect.getmembers(cfg_module, inspect.isclass)
+    env_cfg_cls, train_cfg_cls = None, None
+    for name, cls in classes:
+        if cls.__module__ != "expert_cfg":
+            continue
+        if name.endswith("CfgPPO"):
+            train_cfg_cls = cls
+        elif name.endswith("Cfg"):
+            env_cfg_cls = cls
+    if env_cfg_cls is None or train_cfg_cls is None:
+        raise RuntimeError(f"无法识别 {cfg_path} 中的配置类")
+
+    env_cfg = env_cfg_cls()
+    train_cfg = train_cfg_cls()
+
+    # === Step 3: 获取策略类名并实例化 ===
+    policy_class_name = train_cfg.runner.policy_class_name
+    print("Loaded expert config policy_class_name:", policy_class_name)
+    policy_class = eval(policy_class_name)
+    print("train_cfg config vars:", vars(train_cfg))
+    print("policy config vars:", vars(train_cfg.policy))
+    # 4. 获取策略超参配置
+    policy_cfg_dict = {
+        k: getattr(train_cfg.policy, k)
+        for k in dir(train_cfg.policy.__class__)
+        if not k.startswith("__") and not callable(getattr(train_cfg.policy, k))
+    }
+    policy = policy_class(env_cfg.env.n_proprio,
+                            env_cfg.env.n_scan,
+                            env_cfg.env.num_observations,
+                            env_cfg.env.n_priv_latent,
+                            env_cfg.env.history_len,
+                            8,
+                            **policy_cfg_dict)
+
+    # === Step 4: 加载权重 ===
+    ckpt = torch.load(ckpt_path, map_location=device)
+    policy.load_state_dict(ckpt['model_state_dict'])
+    policy.to(device)
+    policy.eval()
+
+    return policy

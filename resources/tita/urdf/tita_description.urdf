@@ -115,7 +115,7 @@
     <parent link="base_link"/>
     <child link="left_leg_1"/>
     <axis xyz="0 0 1"/>
-    <limit effort="45" lower="-0.785398" upper="0.785398" velocity="25"/>
+    <limit effort="60" lower="-0.785398" upper="0.785398" velocity="25"/>
   </joint>
   <link name="left_leg_2">
     <inertial>
@@ -136,19 +136,19 @@
       </geometry>
       <material name="black"/>
     </visual> -->
-    <!-- <collision>
+    <collision>
       <origin rpy="0 0 -0.131" xyz="0.1 0.021 -0.002"/>
       <geometry>
         <box size="0.2 0.09 0.05"/>
       </geometry>
-    </collision> -->
+    </collision>
   </link>
   <joint name="joint_left_leg_2" type="revolute">
     <origin rpy="-1.5708 0 -1.5708" xyz="0.1426 0 0"/>
     <parent link="left_leg_1"/>
     <child link="left_leg_2"/>
     <axis xyz="0 0 1"/>
-    <limit effort="45" lower="-1.919862" upper="3.490659" velocity="25"/>
+    <limit effort="60" lower="-1.919862" upper="3.490659" velocity="25"/>
   </joint>
   <link name="left_leg_3">
     <inertial>
@@ -179,7 +179,7 @@
     <parent link="left_leg_2"/>
     <child link="left_leg_3"/>
     <axis xyz="0 0 1"/>
-    <limit effort="45" lower="-2.670354" upper="-0.698132" velocity="25"/>
+    <limit effort="60" lower="-2.670354" upper="-0.698132" velocity="25"/>
   </joint>
   <link name="left_leg_4">
     <inertial>
@@ -231,7 +231,7 @@
     <parent link="base_link"/>
     <child link="right_leg_1"/>
     <axis xyz="0 0 1"/>
-    <limit effort="45" lower="-0.785398" upper="0.785398" velocity="25"/>
+    <limit effort="60" lower="-0.785398" upper="0.785398" velocity="25"/>
   </joint>
   <link name="right_leg_2">
     <inertial>
@@ -252,19 +252,23 @@
       </geometry>
       <material name="black"/>
     </visual> -->
-    <!-- <collision>
+    <collision>
       <origin rpy="0 0 -0.131" xyz="0.1 0.021 -0.002"/>
       <geometry>
         <box size="0.2 0.09 0.05"/>
       </geometry>
-    </collision> -->
+      <!-- <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+         <mesh filename="../meshes/right_leg_2.STL"/>
+      </geometry> -->
+    </collision>
   </link>
   <joint name="joint_right_leg_2" type="revolute">
     <origin rpy="-1.5708 0 -1.5708" xyz="-0.1426 0 0"/>
     <parent link="right_leg_1"/>
     <child link="right_leg_2"/>
     <axis xyz="0 0 1"/>
-    <limit effort="45" lower="-1.919862" upper="3.490659" velocity="25"/>
+    <limit effort="60" lower="-1.919862" upper="3.490659" velocity="25"/>
   </joint>
   <link name="right_leg_3">
     <inertial>
@@ -295,7 +299,7 @@
     <parent link="right_leg_2"/>
     <child link="right_leg_3"/>
     <axis xyz="0 0 1"/>
-    <limit effort="45" lower="-2.670354" upper="-0.698132" velocity="25"/>
+    <limit effort="60" lower="-2.670354" upper="-0.698132" velocity="25"/>
   </joint>
   <link name="right_leg_4">
     <inertial>

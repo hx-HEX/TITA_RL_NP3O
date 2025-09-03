@@ -10,7 +10,7 @@ from modules import ActorCritic, ActorCriticRecurrent
 import numpy as np
 import torch
 import copy
-from modules import ActorCriticRMA,ActorCriticBarlowTwins
+from modules import ActorCriticRMA,ActorCriticBarlowTwins,FusionPolicyWithCritic
 from configs.tita_flat_config import TitaFlatCfg, TitaFlatCfgPPO
 from configs.tita_rough_config import TitaRoughCfg, TitaRoughCfgPPO
 from envs.no_constrains_legged_robot import Tita

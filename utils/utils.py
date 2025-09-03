@@ -1,6 +1,7 @@
 import torch
 import numpy as np
-from typing import Tuple
+from typing import Tuple,Callable
+import importlib
 
 _EPS = np.finfo(float).eps * 4.0
 
@@ -44,6 +45,35 @@ def unpad_trajectories(trajectories, masks):
     # Need to transpose before and after the masking to have proper reshaping
     return trajectories.transpose(1, 0)[masks.transpose(1, 0)].view(-1, trajectories.shape[0],
                                                                     trajectories.shape[-1]).transpose(1, 0)
+
+def string_to_callable(name: str) -> Callable:
+    """Resolves the module and function names to return the function.
+
+    Args:
+        name (str): The function name. The format should be 'module:attribute_name'.
+
+    Raises:
+        ValueError: When the resolved attribute is not a function.
+        ValueError: When unable to resolve the attribute.
+
+    Returns:
+        Callable: The function loaded from the module.
+    """
+    try:
+        mod_name, attr_name = name.split(":")
+        mod = importlib.import_module(mod_name)
+        callable_object = getattr(mod, attr_name)
+        # check if attribute is callable
+        if callable(callable_object):
+            return callable_object
+        else:
+            raise ValueError(f"The imported object is not callable: '{name}'")
+    except AttributeError as e:
+        msg = (
+            "We could not interpret the entry as a callable object. The format of input should be"
+            f" 'module:attribute_name'\nWhile processing input '{name}', received the error:\n {e}."
+        )
+        raise ValueError(msg)
 
 class RunningMeanStd(object):
     def __init__(self, epsilon: float = 1e-4, shape: Tuple[int, ...] = ()):
