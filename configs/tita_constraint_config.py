@@ -83,7 +83,7 @@ class TitaConstraintRoughCfg( LeggedRobotCfg ):
         global_reference = False
 
         class ranges:
-            lin_vel_x = [-2.0, 2.0]  # min max [m/s]
+            lin_vel_x = [-1.0, 1.0]  # min max [m/s]
             lin_vel_y = [-1.0, 1.0]  # min max [m/s]
             ang_vel_yaw = [-2, 2]  # min max [rad/s]
             # height = [0.3,0.35] 
@@ -118,9 +118,9 @@ class TitaConstraintRoughCfg( LeggedRobotCfg ):
             feet_stumble = 0.0
             action_rate = -0.01
             action_smoothness= 0
-            stand_still = 0.0
+            stand_still = -0.0
             foot_clearance= -0.0
-            orientation=-1.0
+            orientation=-5.0
             no_fly = 2.0
 
     class domain_rand( LeggedRobotCfg.domain_rand):
@@ -131,7 +131,7 @@ class TitaConstraintRoughCfg( LeggedRobotCfg ):
         randomize_base_mass = True
         added_mass_range = [-1., 3.]
         randomize_base_com = True
-        added_com_range = [-0.1, 0.1]
+        added_com_range = [-0.2, 0.2]
         push_robots = True
         push_interval_s = 15
         max_push_vel_xy = 1
@@ -144,7 +144,7 @@ class TitaConstraintRoughCfg( LeggedRobotCfg ):
         kd_range = [0.8, 1.2]
 
         randomize_lag_timesteps = True
-        lag_timesteps = 3
+        lag_timesteps = 4
 
         disturbance = False
         disturbancFe_range = [-30.0, 30.0]
@@ -175,7 +175,7 @@ class TitaConstraintRoughCfg( LeggedRobotCfg ):
     
     class costs:
         class scales:
-            pos_limit = 0.3
+            pos_limit = 0.6
             torque_limit = 0.3
             dof_vel_limits = 0.3
             # vel_smoothness = 0.1
@@ -241,8 +241,8 @@ class TitaConstraintRoughCfgPPO( LeggedRobotCfgPPO ):
         algorithm_class_name = 'NP3O'
         max_iterations = 10000
         num_steps_per_env = 24
-        resume = True
-        resume_path = '60_2.0_foot>0_vel_xy_model_8000.pt'
+        resume = False
+        resume_path = '60_2.0_foot>0_vel_xy_0_cmd_pit_model_10000.pt'
 
  
 

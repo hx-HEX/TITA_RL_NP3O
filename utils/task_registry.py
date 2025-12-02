@@ -52,6 +52,12 @@ class TaskRegistry():
         # Determine the correct Python file based on the runner class name
         if train_cfg.runner.runner_class_name == "OnPolicyRunner":
             robot_file = "no_constrains_legged_robot.py"
+        elif train_cfg.runner.run_name == "tron1_barlowtwins":
+            robot_file = "tron1_wheel.py"
+        elif train_cfg.runner.run_name == "tron1_feet_barlowtwins":
+            robot_file = "tron1_feet.py"
+        elif train_cfg.runner.run_name == "tron1_unified_barlowtwins":
+            robot_file = "tron1_unified.py"
         else:
             robot_file = "legged_robot.py"
 
@@ -178,6 +184,11 @@ class TaskRegistry():
             if resume:
                 # load previously trained model
                 resume_path = get_load_path(log_root, load_run=train_cfg.runner.load_run, checkpoint=train_cfg.runner.checkpoint)
+                print(f"Loading model from: {resume_path}")
+                runner.load(resume_path)
+        if train_cfg.runner.runner_class_name == "OnConstraintPolicyRunner":
+            if resume:
+                resume_path = os.path.join(ROOT_DIR, train_cfg.runner.resume_path)
                 print(f"Loading model from: {resume_path}")
                 runner.load(resume_path)
         return runner, train_cfg

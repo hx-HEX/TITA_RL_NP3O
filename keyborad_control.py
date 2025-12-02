@@ -14,6 +14,8 @@ from configs.tita_wheel_constraint_config import TitaConstraintWheelCfg, TitaCon
 from configs.tita_feet_constraint_config import TitaConstraintFeetCfg,TitaConstraintFeetCfgPPO
 from configs.tita_flat_config import TitaFlatCfg, TitaFlatCfgPPO
 from configs.tita_rough_config import TitaRoughCfg, TitaRoughCfgPPO
+from configs.tron1_wheel_constraint_config import Tron1ConstraintWheelCfg, Tron1ConstraintWheelCfgPPO
+from configs.tron1_feet_constraint_config import Tron1ConstraintFeetCfg, Tron1ConstraintFeetCfgPPO
 from envs.no_constrains_legged_robot import Tita
 from envs import *
 from export_policy_as_onnx import *
@@ -28,8 +30,8 @@ def play_on_constraint_policy_runner(args):
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     # override some parameters for testing
     env_cfg.env.num_envs = min(env_cfg.env.num_envs, 1)
-    env_cfg.terrain.num_rows = 5
-    env_cfg.terrain.num_cols = 5
+    env_cfg.terrain.num_rows = 10
+    env_cfg.terrain.num_cols = 10
     # env_cfg.terrain.terrain_length = 5
     # env_cfg.terrain.terrain_width = 5
     env_cfg.terrain.curriculum = False
@@ -47,9 +49,12 @@ def play_on_constraint_policy_runner(args):
     env_cfg.domain_rand.randomize_inertia = False
     env_cfg.control.use_filter = True
     env_cfg.commands.heading_command = False
+    env_cfg.domain_rand.radnomize_joint_friction = False
+    env_cfg.domain_rand.radnomize_joint_damping = False
+    env_cfg.domain_rand.randomize_deadband = False
     env_cfg.env.episode_length_s = 500
     env_cfg.terrain.terrain_proportions = [0.2, 0.2, 0.2, 0.2, 0.0, 0.0, 0.2]
-    env_cfg.init_state.pos = [-0.0,0.0,0.4]
+    env_cfg.init_state.pos = [-0.0,0.0, 0.8]
     
     # prepare environment
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
@@ -97,7 +102,7 @@ def play_on_constraint_policy_runner(args):
     # print(policy)
     
     # 加载模型权重
-    model_dict = torch.load(os.path.join(ROOT_DIR, 'logs/tita_feet_constraint/Sep02_19-50-50_test_barlowtwins_feetcontact/model_4800.pt'))
+    model_dict = torch.load(os.path.join(ROOT_DIR, 'logs/tron1_feet_constraint/Nov10_14-47-36_tron1_feet_barlowtwins/model_1200.pt'))
     policy.load_state_dict(model_dict['model_state_dict'])
     policy = policy.to(env.device)
     policy.save_torch_jit_policy('model.pt', env.device)
@@ -117,12 +122,12 @@ def play_on_constraint_policy_runner(args):
     KEY_MAPPING = {
         pygame.K_UP: [0.5, 0, 0, 0],      # 前进
         pygame.K_DOWN: [-1.0, 0, 0, 0],   # 后退
-        pygame.K_LEFT: [0, 0.0, 2.0, 0],    # 左移
-        pygame.K_RIGHT: [0, -0.0, -2.0, 0],  # 右移
+        pygame.K_LEFT: [0, 0.0, 0.6, 0],    # 左移
+        pygame.K_RIGHT: [0, -0.0, -0.6, 0],  # 右移
         pygame.K_w: [0, 0, 0.5, 0],       # 升高身体
         pygame.K_s: [0, 0, -0.5, 0],      # 降低身体
-        pygame.K_a: [0, 0, 0, 0.5],       # 左转
-        pygame.K_d: [0, 0, 0, -0.5],      # 右转
+        pygame.K_a: [0, 0.5, 0, 0.5],       # 左转
+        pygame.K_d: [0, -0.5, 0, -0.5],      # 右转
         pygame.K_SPACE: [0, 0, 0, 0]      # 停止
     }
     
@@ -217,13 +222,14 @@ def play_on_constraint_policy_runner(args):
             # all_data['actions'].append(actions.cpu().numpy())
             # all_data['timesteps'].append(i * env.dt)  # 记录时间戳
 
-            obs, privileged_obs, rewards, costs, dones, infos, base_height,foot_height_mean = env.step(actions)
+            obs, privileged_obs, rewards, costs, dones, infos, base_height,foot_height_mean= env.step(actions)
+            # obs, privileged_obs, rewards, costs, dones, infos = env.step(actions)
             # print("actions[:,3]*4",actions[:,3]*4)
             # print("obs[:,20]/0.05",obs[:,20]/0.05)
             # print("actions[:,7]*4",actions[:,7]*4)
             # print("obs[:,24]/0.05",obs[:,24]/0.05)
             # print("pri_latents[0]",pri_latents[0])
-            # print("foot_height_mean",foot_height_mean)
+            print("foot_height_mean",foot_height_mean)
       
             # 渲染
             env.gym.step_graphics(env.sim)
@@ -300,6 +306,7 @@ if __name__ == '__main__':
     task_registry.register("tita_wheel_constraint",LeggedRobot,TitaConstraintWheelCfg(),TitaConstraintWheelCfgPPO())
     task_registry.register("tita_feet_constraint",LeggedRobot,TitaConstraintFeetCfg(),TitaConstraintFeetCfgPPO())
     task_registry.register("tita_fusion_constraint", LeggedRobot, TitaFusionCfg(), TitaFusionCfgPPO())
-
+    task_registry.register("tron1_wheel_constraint", Tron1Robot, Tron1ConstraintWheelCfg(), Tron1ConstraintWheelCfgPPO())
+    task_registry.register("tron1_feet_constraint", Tron1FeetRobot, Tron1ConstraintFeetCfg(), Tron1ConstraintFeetCfgPPO())
     args = get_args()
     play_on_constraint_policy_runner(args)

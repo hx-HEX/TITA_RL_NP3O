@@ -337,15 +337,16 @@ class NP3OFusion:
                     # 条件 mask
                     mask_wheel = (
                         (terrain_types < 6)
-                        | (((terrain_types >= 6) & (terrain_types < 14)) & (terrain_level < 5))
+                        | (((terrain_types >= 6) & (terrain_types < 14)) & (terrain_level < 4))
                         | ((terrain_types >= 14) & (terrain_types < 18)) 
-                        | ((terrain_types >= 18) & (terrain_level < 5))
+                        # | ((terrain_types >= 18) & (terrain_level < 5))
+                        | ((terrain_types >= 18))
                     )
                     mask_wheel = mask_wheel.squeeze(-1)  # 变成 (B,)
                     mask_biped = ~mask_wheel
 
                     # 初始化 soft target
-                    terrain_soft = torch.zeros((B//2, 2), device=device, dtype=torch.float32)
+                    terrain_soft = torch.zeros((B, 2), device=device, dtype=torch.float32)
 
                     terrain_soft[mask_wheel, :] = torch.tensor([1.0, 0.0], device=device)
                     terrain_soft[mask_biped, :] = torch.tensor([0.0, 1.0], device=device)

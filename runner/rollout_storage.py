@@ -253,6 +253,7 @@ class RolloutStorageWithCost:
             self.action_mean = None
             self.action_sigma = None
             self.hidden_states = None
+            self.q_ref = None 
 
         def clear(self):
             self.__init__()
@@ -277,6 +278,7 @@ class RolloutStorageWithCost:
         self.costs = torch.zeros(num_transitions_per_env, num_envs, *cost_shape, device=self.device)
         self.actions = torch.zeros(num_transitions_per_env, num_envs, *actions_shape, device=self.device)
         self.dones = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device).byte()
+        self.q_ref = torch.zeros(num_transitions_per_env, num_envs, 4, device=self.device)
 
         # For PPO
         self.actions_log_prob = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
@@ -314,6 +316,7 @@ class RolloutStorageWithCost:
         self.actions_log_prob[self.step].copy_(transition.actions_log_prob.view(-1, 1))
         self.mu[self.step].copy_(transition.action_mean)
         self.sigma[self.step].copy_(transition.action_sigma)
+        self.q_ref[self.step].copy_(transition.q_ref)
         self._save_hidden_states(transition.hidden_states)
         self.step += 1
 
@@ -410,6 +413,7 @@ class RolloutStorageWithCost:
         cost_advantages = self.cost_advantages.flatten(0, 1)
         old_mu = self.mu.flatten(0, 1)
         old_sigma = self.sigma.flatten(0, 1)
+        q_ref = self.q_ref.flatten(0, 1)
 
         for epoch in range(num_epochs):
             for i in range(num_mini_batches):
@@ -431,10 +435,11 @@ class RolloutStorageWithCost:
                 cost_advantages_batch = cost_advantages[batch_idx]
                 old_mu_batch = old_mu[batch_idx]
                 old_sigma_batch = old_sigma[batch_idx]
+                q_ref_batch = q_ref[batch_idx]
                 
                 yield obs_batch, critic_observations_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, \
                     old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, (None, None), None,\
-                    target_cost_values_batch,cost_advantages_batch,cost_returns_batch,cost_violation_batch
+                    target_cost_values_batch,cost_advantages_batch,cost_returns_batch,cost_violation_batch,q_ref_batch
 
     # for RNNs only
     def reccurent_mini_batch_generator(self, num_mini_batches, num_epochs=8):

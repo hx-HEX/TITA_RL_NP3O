@@ -158,16 +158,17 @@ class OnConstraintPolicyRunnerFusion:
             
         for it in range(self.current_learning_iteration, tot_iter):
             # ---- Gating 和 Attention Temperature 退火 ----
-            warmup_iters = tot_iter // 2   # 可以设置为一半迭代数
+            warmup_iters = tot_iter // 2   # 一半迭代数内退火
             ratio = min(1.0, it / warmup_iters)
 
+            # eps 从 init -> final（鼓励前期探索，后期更确定）
             eps = self.alg.actor_critic.gating_eps_init * (1.0 - ratio) + \
                 self.alg.actor_critic.gating_eps_final * ratio
             self.alg.actor_critic.set_eps(eps)
 
-            # 温度从 3 退到 1
-            temp = 3.0 - 2.0 * ratio
-            self.alg.actor_critic.set_temperature(max(temp, 1.0))
+            # 温度从 3.0 退到 0.5（分布逐渐 sharper）
+            temp = 3.0 - 2.5 * ratio   # 3.0 -> 0.5
+            self.alg.actor_critic.set_temperature(max(temp, 0.5))
 
             if self.alg.actor_critic.imi_flag and self.cfg['resume']: 
                 step_size = 1/int(tot_iter/2)

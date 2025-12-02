@@ -3,6 +3,7 @@ import os
 from collections import deque
 import statistics
 import warnings
+import math
 
 from torch.utils.tensorboard import SummaryWriter
 import torch
@@ -29,6 +30,7 @@ class OnConstraintPolicyRunner:
         self.depth_encoder_cfg = train_cfg["depth_encoder"]
         self.device = device
         self.env = env
+        self.train_type = train_cfg["runner"]["experiment_name"]
         
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
@@ -119,9 +121,9 @@ class OnConstraintPolicyRunner:
         cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
         tot_iter = self.current_learning_iteration + num_learning_iterations
+        current_learning_iteration = 0
         # self.act_shed,self.imi_shed,self.lag_shed = hard_phase_schedualer(max_iters=tot_iter,
         #             phase1_end=self.phase1_end)
-
         #imitation_mode
         if self.alg.actor_critic.imi_flag and self.cfg['resume']: 
             self.alg.actor_critic.imitation_mode()
@@ -131,14 +133,13 @@ class OnConstraintPolicyRunner:
                 step_size = 1/int(tot_iter/2)
                 imi_weight = max(0,1 - it * step_size)
                 self.alg.set_imi_weight(imi_weight)
-            
+            current_learning_iteration += 1
             start = time.time()
             # Rollout
             with torch.inference_mode():
                 for i in range(self.num_steps_per_env):
-                   
                     actions = self.alg.act(obs, critic_obs, infos)
-                    obs, privileged_obs, rewards,costs,dones, infos,base_height,foot_height_mean = self.env.step(actions)  # obs has changed to next_obs !! if done obs has been reset
+                    obs, privileged_obs, rewards,costs,dones, infos,base_height,foot_height_mean= self.env.step(actions,current_learning_iteration)  # obs has changed to next_obs !! if done obs has been reset
                     critic_obs = privileged_obs if privileged_obs is not None else obs
                     obs, critic_obs,rewards,costs,dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device),costs.to(self.device),dones.to(self.device)
                     self.alg.process_env_step(rewards,costs,dones, infos)
@@ -166,7 +167,7 @@ class OnConstraintPolicyRunner:
 
             #update k value for better expolration
             k_value = self.alg.update_k_value(it)
-            mean_value_loss,mean_cost_value_loss,mean_viol_loss,mean_surrogate_loss, mean_imitation_loss, mean_symmetry_loss,mean_pri_loss = self.alg.update()
+            mean_value_loss,mean_cost_value_loss,mean_viol_loss,mean_surrogate_loss, mean_imitation_loss, mean_symmetry_loss,mean_pri_loss,mean_ref_imitation_loss = self.alg.update()
             self.base_height_sample = base_height
             stop = time.time()
             learn_time = stop - start
@@ -209,7 +210,7 @@ class OnConstraintPolicyRunner:
         self.writer.add_scalar('Loss/mean_viol_loss', locs['mean_viol_loss'], locs['it'])
         self.writer.add_scalar('Loss/mean_imitation_loss', locs['mean_imitation_loss'], locs['it'])
         self.writer.add_scalar('Loss/mean_pri_loss', locs['mean_pri_loss'], locs['it'])
-        self.writer.add_scalar('Loss/mean_symmetry_loss', locs['mean_symmetry_loss'], locs['it'])
+        self.writer.add_scalar('Loss/mean_ref_imitation_loss', locs['mean_ref_imitation_loss'], locs['it'])
         self.writer.add_scalar('Loss/learning_rate', self.alg.learning_rate, locs['it'])
         self.writer.add_scalar('Policy/mean_noise_std', mean_std.item(), locs['it'])
         self.writer.add_scalar('Perf/total_fps', fps, locs['it'])
@@ -233,6 +234,7 @@ class OnConstraintPolicyRunner:
                           f"""{'cost value function loss:':>{pad}} {locs['mean_cost_value_loss']:.4f}\n"""
                           f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
                           f"""{'viol loss:':>{pad}} {locs['mean_viol_loss']:.4f}\n"""
+                          f"""{'ref_imi loss:':>{pad}} {locs['mean_ref_imitation_loss']:.4f}\n"""
 
                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
                           f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
@@ -246,6 +248,7 @@ class OnConstraintPolicyRunner:
                           f"""{'cost value function loss:':>{pad}} {locs['mean_cost_value_loss']:.4f}\n"""
                           f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
                           f"""{'viol loss:':>{pad}} {locs['mean_viol_loss']:.4f}\n"""
+                          f"""{'ref_imi loss:':>{pad}} {locs['mean_ref_imitation_loss']:.4f}\n"""
 
                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n""")
             #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
@@ -278,7 +281,11 @@ class OnConstraintPolicyRunner:
         print("Loading model from {}...".format(path))
         loaded_dict = torch.load(path, map_location=self.device)
         self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
-        self.alg.estimator.load_state_dict(loaded_dict['estimator_state_dict'])
+        if 'estimator_state_dict' in loaded_dict:
+            self.alg.estimator.load_state_dict(loaded_dict['estimator_state_dict'])
+        else:
+            warnings.warn("'estimator_state_dict' not found, skipping...")
+
         if self.if_depth:
             if 'depth_encoder_state_dict' not in loaded_dict:
                 warnings.warn("'depth_encoder_state_dict' key does not exist, not loading depth encoder...")
@@ -308,4 +315,3 @@ class OnConstraintPolicyRunner:
         if device is not None:
             self.alg.actor_critic.to(device)
         return self.alg.actor_critic
-    

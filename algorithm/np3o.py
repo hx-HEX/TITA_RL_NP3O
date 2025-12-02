@@ -143,6 +143,7 @@ class NP3O:
             self.transition.rewards += self.gamma * torch.squeeze(self.transition.values * infos['time_outs'].unsqueeze(1).to(self.device), 1)
             self.transition.costs += self.gamma * (self.transition.costs * infos['time_outs'].unsqueeze(1).to(self.device))
         # Record the transition
+        self.transition.q_ref = infos["q_ref"].clone().to(self.device)
         self.storage.add_transitions(self.transition)
         self.transition.clear()
         self.actor_critic.reset(dones)
@@ -212,9 +213,10 @@ class NP3O:
         mean_surrogate_loss = 0
         mean_imitation_loss = 0
         mean_pri_loss = 0
+        mean_ref_imitation_loss = 0
         # -- Symmetry loss
         if self.symmetry:
-            mean_symmetry_loss = 0
+            mean_symmetry_loss = None
         else:
             mean_symmetry_loss = None
 
@@ -228,7 +230,7 @@ class NP3O:
         else:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         for obs_batch, critic_obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
-            old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch, target_cost_values_batch,cost_advantages_batch,cost_returns_batch,cost_violation_batch in generator:
+            old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch, target_cost_values_batch,cost_advantages_batch,cost_returns_batch,cost_violation_batch,q_ref_batch in generator:
 
                 # number of augmentations per sample
                 # we start with 1 and increase it if we use symmetry augmentation
@@ -260,6 +262,7 @@ class NP3O:
                     cost_advantages_batch = cost_advantages_batch.repeat(num_aug, 1)
                     cost_returns_batch = cost_returns_batch.repeat(num_aug, 1)
                     cost_violation_batch = cost_violation_batch.repeat(num_aug, 1)  # 如果有这个量并用于loss
+                    q_ref_batch = q_ref_batch.repeat(num_aug, 1)
 
                 # -- actor
                 self.actor_critic.act(obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0]) # match distribution dimension
@@ -312,15 +315,20 @@ class NP3O:
                 combine_value_loss = self.cost_value_loss_coef * cost_value_loss + self.value_loss_coef * value_loss
                 entropy_loss = - self.entropy_coef * entropy_batch.mean()
                 
+                ref_min_flag = False#only feet
                 if self.imi_flag:
+                    if ref_min_flag:
+                        ref_imitation_loss = self.compute_ref_imitation_loss(self.actor_critic.action_mean, q_ref_batch)
+                    else:
+                        ref_imitation_loss = 0.0
                     imitation_loss, pri_loss = self.actor_critic.imitation_learning_loss(obs_batch)
                     loss = main_loss + combine_value_loss + entropy_loss \
-                        + self.imi_weight * imitation_loss 
+                        + self.imi_weight * imitation_loss + pri_loss + self.imi_weight * ref_imitation_loss
                 else:
                     loss = main_loss + combine_value_loss + entropy_loss 
 
                 # Symmetry loss
-                if self.symmetry:
+                if False:
                     # obtain the symmetric actions
                     # if we did augmentation before then we don't need to augment again
                     if not self.symmetry["use_data_augmentation"]:
@@ -367,9 +375,12 @@ class NP3O:
                 if self.imi_flag:
                     mean_imitation_loss += imitation_loss.item()
                     mean_pri_loss += pri_loss.item()
+                    if ref_min_flag:
+                        mean_ref_imitation_loss += ref_imitation_loss.item()
                 else:
                     mean_imitation_loss += 0
                     mean_pri_loss +=0
+                    mean_ref_imitation_loss+=0
                 # -- Symmetry loss
                 if mean_symmetry_loss is not None:
                     mean_symmetry_loss += symmetry_loss.item()
@@ -381,13 +392,14 @@ class NP3O:
         mean_surrogate_loss /= num_updates
         mean_imitation_loss /= num_updates*self.substeps
         mean_pri_loss /= num_updates*self.substeps
+        mean_ref_imitation_loss /= num_updates
         # -- For Symmetry
         if mean_symmetry_loss is not None:
             mean_symmetry_loss /= num_updates
 
         self.storage.clear()
 
-        return mean_value_loss,mean_cost_value_loss,mean_viol_loss,mean_surrogate_loss,mean_imitation_loss,mean_symmetry_loss,mean_pri_loss
+        return mean_value_loss,mean_cost_value_loss,mean_viol_loss,mean_surrogate_loss,mean_imitation_loss,mean_symmetry_loss,mean_pri_loss,mean_ref_imitation_loss
     
     def update_depth_actor(self, actions_student_batch, actions_teacher_batch):
         if self.if_depth:
@@ -397,3 +409,9 @@ class NP3O:
             nn.utils.clip_grad_norm_(self.depth_actor.parameters(), self.max_grad_norm)
             self.depth_actor_optimizer.step()
             return depth_actor_loss.item()
+    
+    def compute_ref_imitation_loss(self, mean_actions_batch, q_ref_batch):
+        hip_knee_indices = [1, 2, 5, 6]
+        mean_actions_sel = mean_actions_batch[:, hip_knee_indices]
+        imitation_loss_ref = F.mse_loss(mean_actions_sel, q_ref_batch)
+        return imitation_loss_ref

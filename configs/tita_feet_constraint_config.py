@@ -32,7 +32,7 @@ from configs.legged_robot_config import LeggedRobotCfg, LeggedRobotCfgPPO
 from global_config import ROOT_DIR
 class TitaConstraintFeetCfg( LeggedRobotCfg ):
     class env(LeggedRobotCfg.env):
-        num_envs = 8192
+        num_envs = 4096
 
         n_scan = 187
         n_priv_latent =  4 + 1 + 8 + 8 + 8 + 6 + 1 + 2 + 1 - 3
@@ -44,6 +44,7 @@ class TitaConstraintFeetCfg( LeggedRobotCfg ):
     class gait:
         num_gait_params = 4
         resampling_time = 5  # time before command are changed[s]
+        touch_down_vel = 0.0
 
         class ranges:
             frequencies = [1.5, 2.5]
@@ -52,7 +53,7 @@ class TitaConstraintFeetCfg( LeggedRobotCfg ):
             # frequencies = [2, 2]
             # offsets = [0.5, 0.5]
             durations = [0.5, 0.5]
-            swing_height = [0.0, 0.1]
+            swing_height = [0.05, 0.05]
 
     class init_state( LeggedRobotCfg.init_state ):
         pos = [0.0, 0.0, 0.4] # x,y,z [m]
@@ -78,8 +79,8 @@ class TitaConstraintFeetCfg( LeggedRobotCfg ):
         # PD Drive parameters:
         control_type = 'P'
         stiffness = {
-            "joint_left_leg_1": 40,
-            "joint_right_leg_1": 40,
+            "joint_left_leg_1": 60,
+            "joint_right_leg_1": 60,
             "joint_left_leg_2": 40,
             "joint_right_leg_2": 40,
             "joint_left_leg_3": 40,
@@ -99,8 +100,10 @@ class TitaConstraintFeetCfg( LeggedRobotCfg ):
         }  # [N*m*s/rad]
         # action scale: target angle = actionScale * action + defaultAngle
         action_scale = 0.5
+        # action_scale_pos = 0.25
+        # action_scale_vel = 0.5
         action_scale_pos = 0.5
-        action_scale_vel = 4.0
+        action_scale_vel = 0.5
         # decimation: Number of control action updates @ sim DT per policy DT
         decimation = 4
         hip_scale_reduction = 0.5
@@ -136,39 +139,50 @@ class TitaConstraintFeetCfg( LeggedRobotCfg ):
         base_height_target = 0.35
         min_feet_distance = 0.42
         max_feet_distance = 0.46
+        kappa_gait_probs = 0.05
+        gait_force_sigma = 25.0
+        gait_vel_sigma = 0.25
+        gait_height_sigma = 0.005
         class scales( LeggedRobotCfg.rewards.scales ):
-            torques = -0.00001 
+            torques = -0.00016
             powers = -0.0
             termination = -0.0
             tracking_lin_vel = 2.0
-            tracking_ang_vel = 0.5
-            lin_vel_z = -0.0
-            ang_vel_xy = -0.05
-            dof_vel = -5e-5
-            dof_acc = -2.5e-7
-            base_height = -5.0
+            tracking_ang_vel = 1.0
+            lin_vel_z = -0.00
+            ang_vel_xy = -0.1
+            dof_vel = -0.0
+            dof_acc = -1.5e-7
+            base_height = -20.0
             feet_air_time = 0.0
             collision = -10.0
             feet_stumble = 0.0
-            action_rate = -0.01
-            action_smoothness= -0.01
+            action_rate = -0.03
+            action_smoothness= -0.03
             stand_still = -1.0
             foot_clearance= -0.0
-            orientation=-100.0
+            orientation= -100.0
             feet_distance = -5.0
             no_fly = 2.0
             foot_slide_up = -0.00
             hip_pos = -0.2 
             hip_symmetry = -1.0
-            dof_pos_limits = -1.0    
+            dof_pos_limits = -1.0  
+            still_wheel_action = -0.5
+            # tracking_contacts_shaped_force = -2.0
+            # tracking_contacts_shaped_vel = -2.0  
+            # tracking_contacts_shaped_height = -2.0
 
     class domain_rand( LeggedRobotCfg.domain_rand):
+        radnomize_joint_friction = False
+        radnomize_joint_damping = False
         randomize_friction = True
-        friction_range = [0.0, 1.75]
+        friction_range = [0.2, 1.2]
+        # friction_range = [0.2, 1.6]
         randomize_restitution = True
         restitution_range = [0.0,1.0]
         randomize_base_mass = True
-        added_mass_range = [-0.5, 5]
+        added_mass_range = [-0.5, 2]
         randomize_base_com = True
         rand_com_vec = [0.03, 0.03, 0.03]
         randomize_inertia = True
@@ -189,11 +203,16 @@ class TitaConstraintFeetCfg( LeggedRobotCfg ):
         randomize_imu_offset = True
         randomize_imu_offset_range = [-1.2, 1.2]
         randomize_lag_timesteps = True
-        lag_timesteps = 3
+        lag_timesteps = 4 #dt = 0.05
+        # lag_timesteps = 8 # dt = 0.025
 
-        disturbance = True
+        disturbance = False
         disturbancFe_range = [-30.0, 30.0]
         disturbance_interval = 8
+
+        randomize_deadband = True
+        deadband_range = [0.8, 1.2]
+        deadband = 0.05
     
     class depth( LeggedRobotCfg.depth):
         use_camera = False
@@ -287,7 +306,7 @@ class TitaConstraintFeetCfgPPO( LeggedRobotCfgPPO ):
         cost_viol_loss_coef = 0.1
         # -- Symmetry Augmentation
         symmetry_cfg = {
-            "use_data_augmentation": True,  # this adds symmetric trajectories to the batch
+            "use_data_augmentation": False,  # this adds symmetric trajectories to the batch
             "use_mirror_loss": False,       # this adds symmetry loss term to the loss function
             "data_augmentation_func": "utils.symmetry_utils:get_symmetric_states",
             "mirror_loss_coeff": 0.0,
@@ -321,7 +340,7 @@ class TitaConstraintFeetCfgPPO( LeggedRobotCfgPPO ):
         algorithm_class_name = 'NP3O'
         max_iterations = 10000
         num_steps_per_env = 24
-        resume = True
-        resume_path = 'logs/tita_feet_constraint/Sep02_14-17-36_test_barlowtwins_feetcontact/model_5100.pt'
+        resume = False
+        resume_path = 'logs/tita_feet_constraint/Oct08_03-14-46_test_barlowtwins_feetcontact/model_10000.pt'
 
   

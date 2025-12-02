@@ -4,3 +4,4 @@ from .tita_constraint_config import *
 
 from .tita_rough_config import TitaRoughCfg, TitaRoughCfgPPO
 from .tita_flat_config import TitaFlatCfg, TitaFlatCfgPPO
+from .tron1_wheel_constraint_config import Tron1ConstraintWheelCfg, Tron1ConstraintWheelCfgPPO

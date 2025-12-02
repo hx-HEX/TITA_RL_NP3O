@@ -8,11 +8,14 @@ from configs.tita_flat_config import TitaFlatCfg, TitaFlatCfgPPO
 from configs.tita_rough_config import TitaRoughCfg, TitaRoughCfgPPO
 from envs.no_constrains_legged_robot import Tita
 from configs.tita_feet_constraint_config import TitaConstraintFeetCfg,TitaConstraintFeetCfgPPO
+from configs.tron1_wheel_constraint_config import Tron1ConstraintWheelCfg, Tron1ConstraintWheelCfgPPO
+from configs.tron1_feet_constraint_config import Tron1ConstraintFeetCfg, Tron1ConstraintFeetCfgPPO
+from configs.tron1_unified_constraint_config import Tron1ConstraintUnifiedCfg, Tron1ConstraintUnifiedCfgPPO
 
 from global_config import ROOT_DIR, ENVS_DIR
 import isaacgym
 from utils.helpers import get_args
-from envs import LeggedRobot
+from envs import LeggedRobot, Tron1Robot, Tron1FeetRobot,Tron1UnifiedRobot
 from utils.task_registry import task_registry
 
 def train(args):
@@ -40,6 +43,10 @@ if __name__ == '__main__':
     task_registry.register("tita_fusion_constraint", LeggedRobot, TitaFusionCfg(), TitaFusionCfgPPO())
     task_registry.register("tita_flat", Tita, TitaFlatCfg(), TitaFlatCfgPPO())
     task_registry.register("tita_rough", Tita, TitaRoughCfg(), TitaRoughCfgPPO())
+
+    task_registry.register("tron1_wheel_constraint", Tron1Robot, Tron1ConstraintWheelCfg(), Tron1ConstraintWheelCfgPPO())
+    task_registry.register("tron1_feet_constraint", Tron1FeetRobot, Tron1ConstraintFeetCfg(), Tron1ConstraintFeetCfgPPO())
+    task_registry.register("tron1_unified_constraint", Tron1UnifiedRobot, Tron1ConstraintUnifiedCfg(), Tron1ConstraintUnifiedCfgPPO())
 
     args = get_args()
     train(args)
